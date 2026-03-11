@@ -11,68 +11,9 @@ from pymoo.operators.selection.rnd import RandomSelection
 from pymoo.problems import get_problem
 from pymoo.optimize import minimize
 
-class AGEASurvival(Survival):
-    def __init__(self, init_div=15, min_div=10, max_div=30):
-        super().__init__(filter_infeasible=True)
-        self.div = init_div        
-        self.min_div = min_div     
-        self.max_div = max_div     
-        self.nds = NonDominatedSorting()
-        self.z_star = None  # Ideal point
-        self.z_nad = None   # Grid Nadir point 
-
-    def _get_grid_indices(self, F, z_star, z_nad, div):
-        """Tính I_ij theo công thức (7) """
-        gs = (z_nad - z_star) / (div - 1)
-        gs = np.where(gs == 0, 1e-6, gs)
-        lb = z_star - gs / 2 # lb_j theo công thức (5)
-        
-        grid_indices = np.floor((F - lb) / gs).astype(int)
-        return np.clip(grid_indices, 0, div - 1)
-
-    def _compute_density(self, grid_indices):
-        """Tính mật độ ô lưới bằng NumPy (Vectorized)"""
-        _, inverse_indices, counts = np.unique(grid_indices, axis=0, 
-                                               return_inverse=True, 
-                                               return_counts=True)
-        return counts[inverse_indices]
-
-    def _do(self, problem, pop, *args, n_survive=None, **kwargs):
-        if n_survive is None:
-            n_survive = len(pop) // 2
-
-        F = pop.get("F")
-        
-        #  NON-DOMINATED SELECTION 
-        fronts = self.nds.do(F)
-        NDP_op = F[fronts[0]] 
-        
-        #  CẬP NHẬT IDEAL POINT & NADIR POINT ---
-        z_star_current = np.min(F, axis=0)
-        if self.z_star is None:
-            self.z_star = z_star_current
-        else:
-            self.z_star = np.minimum(self.z_star, z_star_current)
-            
-        # Nadir point tạm thời tính từ NDP_op (Eq 3)
-        z_nad_temp = np.max(NDP_op, axis=0)
-
-        #-------------------------------------------------
-        # --- ALGORITHM 2: GRID STABILIZATION STRATEGY ---
-        #-------------------------------------------------
-        if self.z_nad is None:
-            self.z_nad = z_nad_temp
-        else: 
-            gs = (self.z_nad - self.z_star) / (self.div - 1)
-            gs = np.where(gs <= 0, 1e-6, gs)
-            
-            for j in range(len(self.z_nad)):
-                if np.abs(z_nad_temp[j] - self.z_nad[j]) > gs[j] / 2:
-                    self.z_nad[j] = z_nad_temp[j]
-
-        #---------------------------------------------
-        # --- ALGORITHM 3: ENVIRONMENTAL SELECTION ---
-        #---------------------------------------------
+ #---------------------------------------------
+ # --- ALGORITHM 3: ENVIRONMENTAL SELECTION ---
+ #---------------------------------------------
 
        def algorithm_3_environmental_selection(G, div, z_star, z_nad):
    
@@ -136,24 +77,93 @@ class AGEASurvival(Survival):
         else:
             return G_star, I_star, current_div
 
-        #--------------------------------------------
-        # --- ALGORITHM 5: POPULATION RESELECTION ---
-        #--------------------------------------------
+#--------------------------------------------
+# --- ALGORITHM 5: POPULATION RESELECTION ---
+#--------------------------------------------
 
-        if new_div != self.div:
-            self.div = new_div
-            if last_front_info is not None:
-                front_indices, remaining = last_front_info
-                survivors = survivors[:-remaining] # Loại bỏ phần cũ
-                
-                # Tính lại với div mới
-                grid_idx_new = self._get_grid_indices(F[front_indices], self.z_star, self.z_nad, self.div)
-                scores_new = self._compute_density(grid_idx_new)
-                
-                sorted_idx_new = np.argsort(scores_new)
-                survivors.extend(front_indices[sorted_idx_new[:remaining]])
+    def algorithm_5_selection(G, I, N):
+        num_solutions = len(G)
+        crowding_degree = np.zeros(num_solutions)
+        
+        for i in range(num_solutions):
+            chebyshev_dist = np.max(np.abs(I - I[i]), axis=1)
+            
+            crowding_degree[i] = np.sum(chebyshev_dist == 1)
+            
+        fitness = 1.0 / (1.0 + crowding_degree)
+        
+        total_fitness = np.sum(fitness)
+        probabilities = fitness / total_fitness
+        
+        selected_indices = np.random.choice(
+            np.arange(num_solutions), 
+            size=N, 
+            p=probabilities, 
+            replace=True
+        )
+        
+        P_parents = G[selected_indices]
+        
+        return P_parents, selected_indices
+class AGEASurvival(Survival):
+    def __init__(self, init_div=15, min_div=10, max_div=30):
+        super().__init__(filter_infeasible=True)
+        self.div = init_div        
+        self.min_div = min_div     
+        self.max_div = max_div     
+        self.nds = NonDominatedSorting()
+        self.z_star = None  # Ideal point
+        self.z_nad = None   # Grid Nadir point 
 
-        return pop[survivors]
+    def _get_grid_indices(self, F, z_star, z_nad, div):
+        """Tính I_ij theo công thức (7) """
+        gs = (z_nad - z_star) / (div - 1)
+        gs = np.where(gs == 0, 1e-6, gs)
+        lb = z_star - gs / 2 # lb_j theo công thức (5)
+        
+        grid_indices = np.floor((F - lb) / gs).astype(int)
+        return np.clip(grid_indices, 0, div - 1)
+
+    def _compute_density(self, grid_indices):
+        """Tính mật độ ô lưới bằng NumPy (Vectorized)"""
+        _, inverse_indices, counts = np.unique(grid_indices, axis=0, 
+                                               return_inverse=True, 
+                                               return_counts=True)
+        return counts[inverse_indices]
+
+    def _do(self, problem, pop, *args, n_survive=None, **kwargs):
+        if n_survive is None:
+            n_survive = len(pop) // 2
+
+        F = pop.get("F")
+        
+        #  NON-DOMINATED SELECTION 
+        fronts = self.nds.do(F)
+        NDP_op = F[fronts[0]] 
+        
+        #  CẬP NHẬT IDEAL POINT & NADIR POINT ---
+        z_star_current = np.min(F, axis=0)
+        if self.z_star is None:
+            self.z_star = z_star_current
+        else:
+            self.z_star = np.minimum(self.z_star, z_star_current)
+            
+        # Nadir point tạm thời tính từ NDP_op (Eq 3)
+        z_nad_temp = np.max(NDP_op, axis=0)
+
+        #-------------------------------------------------
+        # --- ALGORITHM 2: GRID STABILIZATION STRATEGY ---
+        #-------------------------------------------------
+        if self.z_nad is None:
+            self.z_nad = z_nad_temp
+        else: 
+            gs = (self.z_nad - self.z_star) / (self.div - 1)
+            gs = np.where(gs <= 0, 1e-6, gs)
+            
+            for j in range(len(self.z_nad)):
+                if np.abs(z_nad_temp[j] - self.z_nad[j]) > gs[j] / 2:
+                    self.z_nad[j] = z_nad_temp[j]
+
 
 class AGEA(GeneticAlgorithm):
     def __init__(self, **kwargs):
