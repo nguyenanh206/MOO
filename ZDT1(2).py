@@ -82,19 +82,34 @@ from pymoo.optimize import minimize
 #--------------------------------------------
 
     def algorithm_5_selection(G, I, N):
-        num_solutions = len(G)
-        crowding_degree = np.zeros(num_solutions)
         
+        num_solutions = len(G)
+        M = G.shape[1]  # Lấy số lượng mục tiêu M 
+        
+
+        crowding = np.zeros(num_solutions)
         for i in range(num_solutions):
+            # Khoảng cách Chebyshev: max(|I_i - I_j|)
             chebyshev_dist = np.max(np.abs(I - I[i]), axis=1)
             
-            crowding_degree[i] = np.sum(chebyshev_dist == 1)
+            crowding[i] = np.sum(chebyshev_dist == 1)
             
-        fitness = 1.0 / (1.0 + crowding_degree)
+        root_crowding = np.power(crowding, 1.0 / M)
+        max_root_crowding = np.max(root_crowding)
         
-        total_fitness = np.sum(fitness)
-        probabilities = fitness / total_fitness
+
+        if max_root_crowding == 0:
+            fitness = np.ones(num_solutions) # Eq 14 sẽ trả về 1 cho tất cả
+        else:
+            # Áp dụng chính xác Phương trình 14
+            fitness = ((N - 1) * root_crowding / max_root_crowding) + 1
+            
         
+        inverse_fitness = 1.0 / fitness
+        total_inv_fitness = np.sum(inverse_fitness)
+        probabilities = inverse_fitness / total_inv_fitness
+        
+        # Quay bánh xe Roulette N lần (có hoàn lại)
         selected_indices = np.random.choice(
             np.arange(num_solutions), 
             size=N, 
@@ -104,7 +119,8 @@ from pymoo.optimize import minimize
         
         P_parents = G[selected_indices]
         
-        return P_parents, selected_indices
+        return P_parents, selected_indices\
+     
 class AGEASurvival(Survival):
     def __init__(self, init_div=15, min_div=10, max_div=30):
         super().__init__(filter_infeasible=True)
