@@ -74,38 +74,67 @@ class AGEASurvival(Survival):
         # --- ALGORITHM 3: ENVIRONMENTAL SELECTION ---
         #---------------------------------------------
 
-        survivors = []
-        last_front_info = None 
+       def algorithm_3_environmental_selection(G, div, z_star, z_nad):
+   
+        denominator = z_nad - z_star
+        denominator = np.where(denominator == 0, 1e-6, denominator)
         
-        for front in fronts:
-            if len(survivors) + len(front) <= n_survive:
-                survivors.extend(front)
-                if len(survivors) == n_survive: break
+        gs = denominator / (div - 1)
+        gs = np.where(gs == 0, 1e-6, gs)
+        lb = z_star - gs / 2
+        
+        I = np.floor((G - lb) / gs).astype(int)
+        I = np.clip(I, 0, div - 1)
+        gc = lb + I * gs
+        
+        G_norm = (G - z_star) / denominator
+        gc_norm = (gc - z_star) / denominator
+        
+        delta = 1.0e6  # Trọng số phạt rất lớn
+        distance = G_norm - gc_norm
+        
+        distance = np.where(I == 0, distance * delta, distance)
+        fitness = np.sqrt(np.sum(distance**2, axis=1))
+        
+        unique_grids = np.unique(I, axis=0)
+        selected_indices = []
+        
+        for grid in unique_grids:
+            in_grid_mask = np.all(I == grid, axis=1)
+            indices_in_grid = np.where(in_grid_mask)[0]
+            
+            best_idx = indices_in_grid[np.argmin(fitness[indices_in_grid])]
+            selected_indices.append(best_idx)
+            
+        G_selected = G[selected_indices]
+        I_selected = I[selected_indices]
+        
+        return G_selected, I_selected
+
+# =====================================================================
+# THUẬT TOÁN 4: Grid adaptive strategy
+# =====================================================================
+    def algorithm_4_dynamic_grid_adjustment(G_initial, N, current_div, z_star, g_nad):
+        G_star, I_star = algorithm_3_environmental_selection(G_initial, current_div, z_star, g_nad)
+        num_solutions = len(G_star)
+        
+        if num_solutions > N:
+            test_div = max(current_div - 1, 2) # Đảm bảo div không tụt xuống dưới 2
+            
+            G_new, I_new = algorithm_3_environmental_selection(G_initial, test_div, z_star, g_nad)
+            
+            if len(G_new) > N:
+                return G_new, I_new, test_div
             else:
-                remaining = n_survive - len(survivors)
-                front_indices = np.array(front)
-                
-                grid_idx = self._get_grid_indices(F[front_indices], self.z_star, self.z_nad, self.div)
-                scores = self._compute_density(grid_idx)
-                
-                sorted_idx = np.argsort(scores)
-                survivors.extend(front_indices[sorted_idx[:remaining]])
-                last_front_info = (front_indices, remaining)
-                break
+                return G_star, I_star, current_div
 
-        #----------------------------------------------
-        # --- ALGORITHM 4: GRID ADAPTIVE ADJUSTMENT ---
-        #----------------------------------------------
+        elif num_solutions < N:
+            new_div = current_div + 1
+            
+            return G_star, I_star, new_div
 
-        grid_indices_survivors = self._get_grid_indices(F[survivors], self.z_star, self.z_nad, self.div)
-        unique_grids = np.unique(grid_indices_survivors, axis=0)
-        ratio = len(unique_grids) / n_survive
-        
-        new_div = self.div
-        if ratio < 0.3:
-            new_div = min(self.div + 2, self.max_div)
-        elif ratio > 0.8:
-            new_div = max(self.div - 1, self.min_div)
+        else:
+            return G_star, I_star, current_div
 
         #--------------------------------------------
         # --- ALGORITHM 5: POPULATION RESELECTION ---
