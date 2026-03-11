@@ -114,14 +114,14 @@ class AGEASurvival(Survival):
 # =====================================================================
 # THUẬT TOÁN 4: Grid adaptive strategy
 # =====================================================================
-    def algorithm_4_dynamic_grid_adjustment(G_initial, N, current_div, z_star, g_nad):
-        G_star, I_star = algorithm_3_environmental_selection(G_initial, current_div, z_star, g_nad)
+    def algorithm_4_dynamic_grid_adjustment(G_initial, N, current_div, z_star, z_nad):
+        G_star, I_star = algorithm_3_environmental_selection(G_initial, current_div, z_star, z_nad)
         num_solutions = len(G_star)
         
         if num_solutions > N:
             test_div = max(current_div - 1, 2) # Đảm bảo div không tụt xuống dưới 2
             
-            G_new, I_new = algorithm_3_environmental_selection(G_initial, test_div, z_star, g_nad)
+            G_new, I_new = algorithm_3_environmental_selection(G_initial, test_div, z_star, z_nad)
             
             if len(G_new) > N:
                 return G_new, I_new, test_div
